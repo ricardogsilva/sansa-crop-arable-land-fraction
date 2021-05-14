@@ -89,17 +89,16 @@ def main(
         for index, feature_series in enumerate(crop_mask_gdf.iterrows()):
             logger.info(
                 f"Processing crop mask feature ({index + 1!r}/{len(crop_mask_gdf)})...")
-            dc_geom = dc_geometry.Geometry(
+            query = datasets_query.copy()
+            query["geopolygon"] = dc_geometry.Geometry(
                 feature_series["geometry"].__geo_interface__,
                 dc_geometry.CRS(f"EPSG:{crop_mask_gdf.crs.to_epsg()}")
             )
-            query = datasets_query.copy()
-            query["geopolygon"] = dc_geom
             logger.debug("Loading datasets...")
             ds = dc.load_data(**query)
             logger.debug("Applying cloud/shadow/water mask...")
-            valid_ds = _get_cloud_mask(ds)
-            logger.debug("Rasterizing crop mask...")
+            valid_ds = _apply_validity_mask(ds)
+            logger.debug("Rasterizing crop mask feature...")
             crop_mask = _rasterize_feature(valid_ds, feature_series)
             logger.debug("Applying crop mask...")
             crop_ds = valid_ds.where(crop_mask)
@@ -107,11 +106,13 @@ def main(
             ndvi = (crop_ds.nir - crop_ds.red) / (crop_ds.nir + crop_ds.red)
             logger.debug("Calculating aggregated NDVI...")
             aggregated_ndvi = ndvi.max(dim="time")
-            # - get mean and stddev
-            # - calculate CALF
+            mean = aggregated_ndvi.mean()
+            stddev = aggregated_ndvi.std()
+            calf = (aggregated_ndvi - mean) / stddev
             # - write CALF to final array
-            # - reclassify to planted/fallow
-            # - write final arrays
+        # - reclassify to planted/fallow
+        # - write final arrays
+        # - calculate stats
     else:
         logger.debug("Processing entire region of interest...")
         pass
@@ -133,7 +134,7 @@ def _rasterize_feature(
     return rasterized_xarray
 
 
-def _get_cloud_mask(dataset: xr.Dataset):
+def _apply_validity_mask(dataset: xr.Dataset):
     invalid_pixel_flags = [
         "cloud cirrus",
         "cloud thick",

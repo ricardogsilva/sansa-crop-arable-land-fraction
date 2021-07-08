@@ -38,15 +38,20 @@ def main(
     If a crop mask is not provided then calculations shall be done over all of the
     input region of interest
 
+    If a region of interest is not provided, then it is computed from the crop mask.
+    This means that at least one of them must be provided.
+
     """
 
     if region_of_interest is None and crop_mask_path is None:
         logger.critical("Must provide a region of interest or a crop mask")
         raise typer.Abort()
     elif region_of_interest is not None:
-        roi = region_of_interest
+        roi = region_of_interest  # TODO: should probably get the geometry of the ROI
     else:
-        roi = _get_roi(crop_mask_path, crop_mask_layer)
+        roi = _get_roi_bounds(crop_mask_path, crop_mask_layer)  # FIXME: Be sure to use the same representation for the ROI as used above
+
+    # create arrays for the final products
 
     base_query_args = {
         "measurements": [
@@ -68,8 +73,11 @@ def main(
     }
     logger.debug("Connecting to datacube...")
     dc = datacube.Datacube(
-        app="calf",
-        config=str(datacube_configuration),
+        app="calf-algorithm",
+        config=(
+            str(datacube_configuration) if datacube_configuration is not None
+            else None
+        ),
         env=datacube_env,
     )
     logger.debug("Finding input datasets...")
@@ -88,7 +96,7 @@ def main(
         crop_mask_gdf = geopandas.read_file(crop_mask_path, layer=crop_mask_layer)
         for index, feature_series in enumerate(crop_mask_gdf.iterrows()):
             logger.info(
-                f"Processing crop mask feature ({index + 1!r}/{len(crop_mask_gdf)})...")
+                f"Processing crop mask feature ({index + 1}/{len(crop_mask_gdf)})...")
             query = datasets_query.copy()
             query["geopolygon"] = dc_geometry.Geometry(
                 feature_series["geometry"].__geo_interface__,
@@ -183,7 +191,7 @@ def _get_relevant_products(
     return result
 
 
-def _get_roi(
+def _get_roi_bounds(
         crop_mask_path: Path,
         layer_identifier: typing.Optional[typing.Union[str, int]] = None
 ) -> typing.Tuple:

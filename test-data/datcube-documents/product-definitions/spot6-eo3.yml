@@ -1,0 +1,84 @@
+name: test_spot6_gauteng_old_eo3
+description: Spot 6 ARD 10m EO3 prepared from sample sent by Alex Leith (GeoScience Australia)
+metadata_type: eo3
+
+license: CC-BY-4.0
+
+metadata:
+  product:
+    name: test_spot6_gauteng_old_eo3
+
+# ONLY USE THIS IF ALL SCENES ARE THE SAME CRS
+storage:
+  crs: EPSG:32635
+  resolution:
+    x: 1.5
+    y: -1.5
+
+measurements:
+  - name: red
+    aliases:
+      - XS2
+    dtype: int16
+    nodata: -32768.0
+    units: '1'
+
+  - name: green
+    aliases:
+      - XS1
+    dtype: int16
+    nodata: -32768.0
+    units: '1'
+
+  - name: blue
+    aliases:
+      - SWIR
+    dtype: int16
+    nodata: -32768.0
+    units: '1'
+
+  - name: nir
+    aliases:
+      - XS3
+    dtype: int16
+    nodata: -32768.0
+    units: '1'
+
+  - name: spclass
+    dtype: uint8
+    nodata: 0
+    units: '1'
+    flags_definition:
+      sca:
+        bits:
+          - 0
+          - 1
+          - 2
+          - 3
+          - 4
+          - 5
+          - 6
+          - 7
+        description: PCI Spectral Classification
+        values:
+            '100': Vegetation Active Herbaceous
+            '12': Cloud Thick
+            '14': Cloud Cirrus
+            '16': Cloud Thin
+            '20': Shadow or Water
+            '28': Shadow Other
+            '30': Snow
+            '42': Water Deep
+            '44': Water Green
+            '46': Water Turbid
+            '48': Water Shallow
+            '50': Bare Soil
+            '52': Bare Bright Soil
+            '54': Bare Red Soil
+            '56': Bare Dark Soil
+            '58': Bare Burnt Soil
+            '70': Vegetation Senescent
+            '72': Vegetation Senescent Dark
+            '74': Vegetation Senescent Bright
+            '92': Vegetation Active woody conifer
+            '96': Vegetation Active woody broadleaved

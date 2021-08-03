@@ -5,14 +5,7 @@ import uuid
 from pathlib import Path
 
 import datacube
-import fiona
-import geopandas
-import pandas
-import rasterio.features
-from shapely import geometry
 import typer
-import xarray as xr
-from datacube.utils import geometry as dc_geometry
 from datacube.model import Dataset as dc_Dataset
 
 from . import (
@@ -43,6 +36,11 @@ def main(
                     "ARD data."
             ),
             envvar="CALF__END_DATE"
+        ),
+        output_path: Path = typer.Argument(
+            ...,
+            help=("Where to save the generated CALF product"),
+            envvar="CALF__OUTPUT_PATH"
         ),
         region_of_interest: typing.Optional[Path] = typer.Option(
             None,
@@ -259,11 +257,6 @@ def main(
 
     """
 
-    # this means that:
-    # - region of interest layer can have multiple features and the statistical analysis shall
-    #   cover each of them individually
-    #
-
     if region_of_interest is None and crop_mask_path is None:
         logger.critical(
             "Must provide either a region of interest, a crop mask, or both")
@@ -289,7 +282,7 @@ def main(
         logger.exception("Could not connect to datacube")
         typer.Abort()
 
-    outputs = calf.main(
+    calf_dataset = calf.main(
         datacube_connection=dc,
         start_date=start_date,
         end_date=end_date,
@@ -305,111 +298,7 @@ def main(
         resampling_method=resampling_method,
         use_dask=False
     )
-
-    base_query_args = {
-        "measurements": [
-            ard_product_red_band,
-            ard_product_nir_band,
-            ard_product_q_flags_band,
-        ],
-        # "x": roi[0:3:2],
-        # "y": roi[1:4:2],
-        "time": (start_date, end_date),
-        "output_crs": output_crs,
-        "resolution": (-output_resolution, output_resolution),
-        "resampling": resampling_method,
-        # "dask_chunks": {
-        #     "time": 1,
-        #     "x": 3000,
-        #     "y": 3000
-        # },
-    }
-    logger.debug("Finding input datasets...")
-    found_datasets = _get_datasets(
-        dc, base_query_args["time"], product_name=ard_product)
-    if len(found_datasets) == 0:
-        logger.info(
-            "The datacube does not contain any datasets for the specified spatial "
-            "and temporal range."
-        )
-        raise typer.Abort()
-    datasets_query = base_query_args.copy()
-    datasets_query["datasets"] = found_datasets
-
-    if crop_mask_path is not None:
-        logger.debug("Processing crop mask...")
-        crop_mask_gdf = geopandas.read_file(crop_mask_path, layer=crop_mask_layer)
-        for index, feature_series in enumerate(crop_mask_gdf.iterrows()):
-            logger.info(
-                f"Processing crop mask feature ({index + 1}/{len(crop_mask_gdf)})...")
-            query = datasets_query.copy()
-            query["geopolygon"] = dc_geometry.Geometry(
-                feature_series["geometry"].__geo_interface__,
-                dc_geometry.CRS(f"EPSG:{crop_mask_gdf.crs.to_epsg()}")
-            )
-            logger.debug("Loading datasets...")
-            ds = dc.load_data(**query)
-            logger.debug("Applying cloud/shadow/water mask...")
-            valid_ds = _apply_validity_mask(ds)
-            logger.debug("Rasterizing crop mask feature...")
-            crop_mask = _rasterize_feature(valid_ds, feature_series)
-            logger.debug("Applying crop mask...")
-            crop_ds = valid_ds.where(crop_mask)
-            logger.debug("Calculating daily NDVI...")
-            ndvi = (crop_ds.nir - crop_ds.red) / (crop_ds.nir + crop_ds.red)
-            logger.debug("Calculating aggregated NDVI...")
-            aggregated_ndvi = ndvi.max(dim="time")
-            mean = aggregated_ndvi.mean()
-            stddev = aggregated_ndvi.std()
-            calf = (aggregated_ndvi - mean) / stddev
-            # - write CALF to final array
-        # - reclassify to planted/fallow
-        # - write final arrays
-        # - calculate stats
-    else:
-        logger.debug("Processing entire region of interest...")
-        pass
-
-
-def compute_calf(datacube_query: typing.Dict, crop_mask_path):
-    pass
-
-
-def _rasterize_feature(
-        dataset_template: xr.Dataset, feature: pandas.Series) -> xr.DataArray:
-    crs = dataset_template.geobox.crs
-    transform = dataset_template.geobox.transform
-    dims = dataset_template.geobox.dims
-    coords = dataset_template[dims[0]], dataset_template[dims[1]]
-    y, x = dataset_template.geobox.shape
-    reprojected = feature.to_crs(crs=crs)
-    shapes = reprojected.geometry
-    rasterized_array = rasterio.features.rasterize(
-        shapes, out_shape=(y, x), transform=transform)
-    rasterized_xarray = xr.DataArray(
-        rasterized_array, coords=coords, dims=dims)
-    return rasterized_xarray
-
-
-def _apply_validity_mask(dataset: xr.Dataset):
-    invalid_pixel_flags = [
-        "cloud cirrus",
-        "cloud thick",
-        "cloud thin",
-        "shadow or water",
-        "shadow other",
-        "snow",
-        "water deep",
-        "water green",
-        "water turbid",
-        "water shallow",
-    ]
-    raw_flags = dataset.spclass.attrs["flags_definition"]["sca"]["values"]
-    mask = dataset == True
-    for value, flag in raw_flags.items():
-        if flag.lower() in invalid_pixel_flags:
-            mask = mask & (dataset.spclass != value)
-    return dataset.where(mask)
+    calf.write_result_to_disk(calf_dataset, output_path)
 
 
 def _get_datasets(
@@ -431,30 +320,6 @@ def _get_datasets(
                 result.extend(found)
                 break
     return result
-
-
-def _get_roi_bounds(
-        vector_path: Path,
-        layer_identifier: typing.Union[str, int]
-) -> typing.Tuple:
-    with fiona.open(vector_path, layer=layer_identifier) as src:
-        return src.bounds
-
-
-def _get_bounding_box(
-        vector_path: Path,
-        layer_identifier: typing.Union[str, int]
-) -> geometry.Polygon:
-    with fiona.open(vector_path, layer=layer_identifier) as src:
-        min_x, min_y, max_x, max_y = src.bounds
-        return geometry.Polygon(
-            (
-                (min_x, min_y),
-                (max_x, min_y),
-                (max_x, max_y),
-                (min_x, max_y),
-            )
-        )
 
 
 if __name__ == "__main__":

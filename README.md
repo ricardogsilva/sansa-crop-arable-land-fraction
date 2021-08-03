@@ -27,4 +27,5 @@ datacube --config test-data/docker/datacube/datacube.conf --env sandbox dataset 
 # python -m calf.calf --help
 
 # or launch a jupyter notebook server and use the provided `calf-interactive-testing` notebook
+DATACUBE_CONFIG_PATH={full-path-to-datacube.conf} jupyer lab
 ```

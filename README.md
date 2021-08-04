@@ -2,6 +2,13 @@
 
 This repository implements the _Crop Arable Land Fraction_ algorithm.
 
+## Installation
+
+- Install conda
+- Create and activate a conda env
+- Clone this repo
+- Use pip to install it inside the conda env
+
 
 ## Testing
 

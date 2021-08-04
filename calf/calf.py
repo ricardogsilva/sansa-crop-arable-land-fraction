@@ -6,16 +6,15 @@ import typing
 from pathlib import Path
 
 import datacube
-import fiona
 import geopandas
 import numpy as np
+import pandas
 import rasterio.features
 import rasterio.windows
-import rioxarray
+import rioxarray  # NOTE: this import is needed in order to use rioxarray, don't remove!
 import xarray as xr
 from datacube.model import Dataset as dc_Dataset
 from datacube.utils import geometry as dc_geometry
-from shapely import geometry
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +30,12 @@ class CalfOutputName(enum.Enum):
     SEASONAL_NDVI = "seasonal_ndvi"
 
 
+class MissingValue(enum.Enum):
+    NUMERIC_CALF = 100
+    RECLASSIFIED_CALF = 100
+    SEASONAL_NDVI = 100
+
+
 @dataclasses.dataclass()
 class CalfComputationResult:
     numeric_calf: xr.DataArray
@@ -39,6 +44,15 @@ class CalfComputationResult:
     num_planted_pixels: int
     num_fallow_pixels: int
     total_pixels: int
+    mean: float
+    std_dev: float
+
+
+@dataclasses.dataclass()
+class CalfAlgorithmResult:
+    calf_ds: xr.Dataset
+    calf_stats: pandas.DataFrame
+    patches: typing.List[CalfComputationResult]
 
 
 def main(
@@ -55,8 +69,8 @@ def main(
         output_crs: str = "EPSG:32635",
         output_resolution: float = 10,
         resampling_method: str = "cubic",
-        use_dask: bool = False
-) -> xr.Dataset:
+        return_patches: typing.Optional[bool] = False
+) -> CalfAlgorithmResult:
     datacube_base_query = {
         "product": ard_product,
         "measurements": [
@@ -69,12 +83,6 @@ def main(
         "resolution": (-output_resolution, output_resolution),
         "resampling": resampling_method,
     }
-    if use_dask:
-        datacube_base_query["dask_chunks"] = {
-            "time": 1,
-            "x": 3000,
-            "y": 3000
-        }
 
     logger.debug("Finding input datasets...")
     found_datasets = get_ard_datasets(
@@ -92,7 +100,7 @@ def main(
     output_ds = _generate_output_dataset(
         region_of_interest_gdf, output_resolution,
         numeric_calf_fill=np.nan,
-        reclassified_calf_fill=np.nan,
+        reclassified_calf_fill=MissingValue.RECLASSIFIED_CALF.value,
         seasonal_ndvi_fill=np.nan,
         numeric_calf_name=CalfOutputName.NUMERIC_CALF.value,
         reclassified_calf_name=CalfOutputName.RECLASSIFIED_CALF.value,
@@ -104,14 +112,15 @@ def main(
         how="intersection",
         keep_geom_type=True
     )
-    roi_feature_stats = {}
+    # roi_feature_stats = {}
+    roi_feature_stats = []
     feature_calf_results = []
     for series_index, feature_series in intersected_df.iterrows():
-        logger.info(
+        logger.debug(
             f"Processing area {series_index + 1} of {len(intersected_df)} "
             f"({feature_series['name_1']} - {feature_series['name_2']})..."
         )
-        series_stats = roi_feature_stats.setdefault(feature_series["name_1"], [])
+        # series_stats = roi_feature_stats.setdefault(feature_series["name_1"], [])
         calf_result = _compute_calf(
             datacube_connection,
             datacube_base_query.copy(),
@@ -123,36 +132,69 @@ def main(
         if calf_result is None:
             logger.warning(f"Could not calculate CALF for feature {feature_series}")
         else:
-            series_stats.append(
+            roi_feature_stats.append(
                 (
+                    feature_series["name_1"],
                     feature_series["name_2"],
                     calf_result.num_fallow_pixels,
                     calf_result.num_planted_pixels,
                     calf_result.total_pixels
                 )
             )
-            feature_calf_results.append(calf_result)
+            # series_stats.append(
+            #     (
+            #         feature_series["name_2"],
+            #         calf_result.num_fallow_pixels,
+            #         calf_result.num_planted_pixels,
+            #         calf_result.total_pixels
+            #     )
+            # )
+            if return_patches:
+                feature_calf_results.append(calf_result)
             logger.debug("Gathering seasonal ndvi onto the main output dataset...")
             _overlay_arrays(
                 output_ds[CalfOutputName.SEASONAL_NDVI.value],
-                calf_result.seasonal_ndvi
+                calf_result.seasonal_ndvi,
             )
             logger.debug("Gathering numeric CALF onto the main output dataset...")
             _overlay_arrays(
                 output_ds[CalfOutputName.NUMERIC_CALF.value],
-                calf_result.numeric_calf
+                calf_result.numeric_calf,
             )
             logger.debug("Gathering reclassified CALF onto the main output dataset...")
             _overlay_arrays(
                 output_ds[CalfOutputName.RECLASSIFIED_CALF.value],
-                calf_result.reclassified_calf
+                calf_result.reclassified_calf,
+                no_data_value=MissingValue.RECLASSIFIED_CALF.value
             )
     # TODO: write a CSV with the stats
-    return output_ds, feature_calf_results
+    return CalfAlgorithmResult(
+        calf_ds=output_ds,
+        calf_stats=_aggregate_stats(roi_feature_stats),
+        patches=feature_calf_results
+    )
 
 
-def write_result_to_disk(calf_ds: xr.Dataset, output_path: Path):
-    calf_ds.rio.to_raster(output_path)
+def _aggregate_stats(
+        calf_stats: typing.List[typing.Tuple[str, str, int, int, int]]
+) -> pandas.DataFrame:
+    return pandas.DataFrame({
+        "region_of_interest": pandas.Series([row[0] for row in calf_stats]),
+        "crop_mask": pandas.Series([row[1] for row in calf_stats]),
+        "fallow_pixels": pandas.Series([row[2] for row in calf_stats]),
+        "planted_pixels": pandas.Series([row[3] for row in calf_stats]),
+        "calf_pixels": pandas.Series([row[4] for row in calf_stats]),
+    })
+
+
+def write_reclassified_calf_result_to_disk(calf_ds: xr.Dataset, output_path: Path):
+    int_ds = calf_ds[[CalfOutputName.RECLASSIFIED_CALF.value]]
+    int_ds.rio.to_raster(output_path)
+
+
+def write_numeric_calf_result_to_disk(calf_ds: xr.Dataset, output_path: Path):
+    float_ds = calf_ds[[CalfOutputName.NUMERIC_CALF.value, CalfOutputName.SEASONAL_NDVI.value]]
+    float_ds.rio.to_raster(output_path)
 
 
 def _generate_output_dataset(
@@ -170,22 +212,26 @@ def _generate_output_dataset(
         output_resolution,
         burn_value=seasonal_ndvi_fill,
         all_touched=True,
-        fill=numeric_calf_fill
+        fill=seasonal_ndvi_fill,
+        dtype=np.float64
     )
     output_calf_da = rasterize_geodataframe(
         region_of_interest,
         output_resolution,
         burn_value=numeric_calf_fill,
         all_touched=True,
-        fill=numeric_calf_fill
+        fill=numeric_calf_fill,
+        dtype=np.float64
     )
     output_reclassified_da = rasterize_geodataframe(
         region_of_interest,
         output_resolution,
         burn_value=reclassified_calf_fill,
         all_touched=True,
-        fill=reclassified_calf_fill
+        fill=reclassified_calf_fill,
+        dtype=np.uint8
     )
+    output_reclassified_da.rio.write_nodata(reclassified_calf_fill, inplace=True)
     return xr.Dataset(
         {
             seasonal_ndvi_name: output_seasonal_ndvi_da,
@@ -242,6 +288,10 @@ def _compute_calf(
         )
         result = None
     else:
+        base_attrs = {
+            "region_of_interest_feature": feature_series["name_1"],
+            "crop_mask_feature": feature_series["name_2"],
+        }
         logger.debug("Applying cloud/shadow/water mask...")
         valid_da = apply_validity_mask(ds, qflags_band)
         logger.debug("Rasterizing crop mask feature...")
@@ -252,36 +302,59 @@ def _compute_calf(
         ndvi_da = (crop_da.nir - crop_da.red) / (crop_da.nir + crop_da.red)
         logger.debug("Calculating aggregated NDVI...")
         aggregated_ndvi_da = ndvi_da.max(dim="time")
+        aggregated_ndvi_da.attrs.update(base_attrs)
         logger.debug("Applying vegetation threshold to aggregated NDVI...")
         aggregated_vegetation_ndvi = aggregated_ndvi_da.where(
             aggregated_ndvi_da > vegetation_threshold)
-        mean = aggregated_vegetation_ndvi.mean()
-        std_dev = aggregated_vegetation_ndvi.std()
-        logger.debug(f"aggregated NDVI stats: mean: {float(mean)} std_dev: {float(std_dev)}")
+        mean = float(aggregated_vegetation_ndvi.mean())
+        std_dev = float(aggregated_vegetation_ndvi.std())
+        logger.debug(f"aggregated NDVI stats: mean: {mean} std_dev: {std_dev}")
         logger.debug("Computing numeric CALF...")
         calf_da = (aggregated_vegetation_ndvi - mean) / std_dev
+        calf_da.attrs.update(base_attrs)
         calf_da.rio.write_crs(feature_crs, inplace=True)
         logger.debug("Computing reclassified CALF...")
         reclassified_calf_da = xr.where(
             calf_da <= 1,
-            CalfClassification.PLANTED.value,
-            CalfClassification.FALLOW.value
-        )
-        reclassified_calf_da = reclassified_calf_da.astype(np.uint8) * crop_mask
+            CalfClassification.FALLOW.value,
+            CalfClassification.PLANTED.value
+        ) * crop_mask
+        reclassified_calf_da.attrs.update(base_attrs)
+
+        # setting the missing value for reclassified CALF - it cannot be `np.nan`
+        # because we are using a dtype of uint8 and np.nan is considered a float value
+        int_reclassified_calf_da = reclassified_calf_da.fillna(
+            MissingValue.RECLASSIFIED_CALF.value).astype(np.uint8)
+
         logger.debug("Counting number of fallow and planted pixels...")
-        counts, frequencies = np.unique(reclassified_calf_da, return_counts=True)
+        fallow, planted, total = _count_calf_pixels(int_reclassified_calf_da)
         result = CalfComputationResult(
             numeric_calf=calf_da,
-            reclassified_calf=reclassified_calf_da,
+            reclassified_calf=int_reclassified_calf_da,
             seasonal_ndvi=aggregated_vegetation_ndvi,
-            num_planted_pixels=int(frequencies[counts == CalfClassification.PLANTED.value]),
-            num_fallow_pixels=int(frequencies[counts == CalfClassification.FALLOW.value]),
-            total_pixels=int((~np.isnan(reclassified_calf_da)).sum())
+            num_planted_pixels=planted,
+            num_fallow_pixels=fallow,
+            total_pixels=total,
+            mean=mean,
+            std_dev=std_dev
         )
     return result
 
 
-def _overlay_arrays(bottom: xr.DataArray, top: xr.DataArray):
+def _count_calf_pixels(reclassfied_calf: xr.DataArray) -> typing.Tuple[int, int, int]:
+    logger.debug("Counting number of fallow and planted pixels...")
+    counts, frequencies = np.unique(reclassfied_calf, return_counts=True)
+    num_planted = int(frequencies[counts == CalfClassification.PLANTED.value])
+    num_fallow = int(frequencies[counts == CalfClassification.FALLOW.value])
+    total = num_planted + num_fallow
+    return num_fallow, num_planted, total
+
+
+def _overlay_arrays(
+        bottom: xr.DataArray,
+        top: xr.DataArray,
+        no_data_value: typing.Optional[typing.Any] = None
+) -> None:
     window = rasterio.windows.from_bounds(
         *top.rio.bounds(),
         transform=bottom.rio.transform()
@@ -290,8 +363,15 @@ def _overlay_arrays(bottom: xr.DataArray, top: xr.DataArray):
     end_row = int(window.row_off + window.height)
     start_col = int(window.col_off)
     end_col = int(window.col_off + window.width)
-    bottom[start_row:end_row, start_col:end_col] = top.data
 
+    overlay_region = bottom[start_row:end_row, start_col:end_col]
+    region = overlay_region.data
+    top_arr = top.data
+    if no_data_value is None:
+        region = np.where(~np.isnan(top_arr), top_arr, region)
+    else:
+        region = np.where(top_arr != no_data_value, top_arr, region)
+    bottom[start_row:end_row, start_col:end_col] = region
 
 
 def _maybe_reproject(
@@ -356,7 +436,8 @@ def rasterize_feature(
         dataset_template: xr.Dataset,
         feature: geopandas.GeoSeries,
         all_touched: bool = False,
-        fill_value = np.nan
+        burn_value: typing.Optional[int] = 1,
+        fill_value=np.nan
 ) -> xr.DataArray:
     # crs = dataset_template.geobox.crs
     # reprojected = feature.to_crs(crs=crs)
@@ -365,7 +446,7 @@ def rasterize_feature(
     transform = dataset_template.geobox.transform
     y, x = dataset_template.geobox.shape
     rasterized_array = rasterio.features.rasterize(
-        [(shape, 1)],
+        [(shape, burn_value)],
         out_shape=(y, x),
         transform=transform,
         all_touched=all_touched,
@@ -384,6 +465,7 @@ def rasterize_geodataframe(
         burn_value: typing.Optional[int] = 1,
         all_touched: typing.Optional[bool] = False,
         fill: typing.Optional[int] = 0,
+        dtype: typing.Optional[np.dtype] = None
 ) -> xr.DataArray:
     left, bottom, right, top = gdf.total_bounds
     width = int(np.ceil((right - left) / target_resolution))
@@ -411,7 +493,7 @@ def rasterize_geodataframe(
             "x": coords[1],
             "y": coords[0],
         }
-    )
+    ).astype(dtype)
     rasterized_da.rio.write_crs(f"epsg:{gdf.crs.to_epsg()}", inplace=True)
     return rasterized_da
 

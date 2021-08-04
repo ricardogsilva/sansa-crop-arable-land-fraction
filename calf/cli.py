@@ -1,5 +1,4 @@
 import datetime as dt
-import logging
 import typing
 import uuid
 from pathlib import Path
@@ -14,7 +13,6 @@ from . import (
 )
 
 app = typer.Typer()
-logger = logging.getLogger(__name__)
 
 
 @app.command()
@@ -258,17 +256,12 @@ def main(
     """
 
     if region_of_interest is None and crop_mask_path is None:
-        logger.critical(
-            "Must provide either a region of interest, a crop mask, or both")
-        raise typer.Abort()
+        raise typer.Abort("Must provide either a region of interest, a crop mask, or both")
     elif region_of_interest is not None:
         roi = _get_bounding_box(region_of_interest, region_of_interest_layer)
     else:
         roi = _get_bounding_box(crop_mask_path, crop_mask_layer)
 
-    # TODO: create arrays for the final products
-
-    logger.debug("Connecting to datacube...")
     try:
         dc = datacube.Datacube(
             app=f"calf-algorithm-{uuid.uuid4()}",
@@ -279,8 +272,7 @@ def main(
             env=datacube_env,
         )
     except ValueError:
-        logger.exception("Could not connect to datacube")
-        typer.Abort()
+        typer.Abort("Could not connect to datacube")
 
     calf_dataset = calf.main(
         datacube_connection=dc,
@@ -323,6 +315,4 @@ def _get_datasets(
 
 
 if __name__ == "__main__":
-    typer_handler = utils.TyperLoggerHandler()
-    logging.basicConfig(level=logging.DEBUG, handlers=(typer_handler,))
     app()

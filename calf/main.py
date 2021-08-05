@@ -57,8 +57,8 @@ class CalfAlgorithmResult:
 
 def compute_calf(
         datacube_connection: datacube.Datacube,
-        start_date: dt.datetime,
-        end_date: dt.datetime,
+        start_date: typing.Union[str, dt.datetime],
+        end_date: typing.Union[str, dt.datetime],
         ard_product: str,
         region_of_interest_gdf: geopandas.GeoDataFrame,
         crop_mask_gdf: geopandas.GeoDataFrame,
@@ -67,7 +67,7 @@ def compute_calf(
         nir_band: typing.Optional[str] = "nir",
         qflags_band: typing.Optional[str] = "spclass",
         output_crs: str = "EPSG:32635",
-        output_resolution: float = 10,
+        output_resolution: int = 10,
         resampling_method: str = "cubic",
         return_patches: typing.Optional[bool] = False
 ) -> CalfAlgorithmResult:
@@ -112,7 +112,6 @@ def compute_calf(
         how="intersection",
         keep_geom_type=True
     )
-    # roi_feature_stats = {}
     roi_feature_stats = []
     feature_calf_results = []
     for series_index, feature_series in intersected_df.iterrows():
@@ -120,7 +119,6 @@ def compute_calf(
             f"Processing area {series_index + 1} of {len(intersected_df)} "
             f"({feature_series['name_1']} - {feature_series['name_2']})..."
         )
-        # series_stats = roi_feature_stats.setdefault(feature_series["name_1"], [])
         calf_result = _compute_patch_calf(
             datacube_connection,
             datacube_base_query.copy(),
@@ -141,14 +139,6 @@ def compute_calf(
                     calf_result.total_pixels
                 )
             )
-            # series_stats.append(
-            #     (
-            #         feature_series["name_2"],
-            #         calf_result.num_fallow_pixels,
-            #         calf_result.num_planted_pixels,
-            #         calf_result.total_pixels
-            #     )
-            # )
             if return_patches:
                 feature_calf_results.append(calf_result)
             logger.debug("Gathering seasonal ndvi onto the main output dataset...")
@@ -167,24 +157,11 @@ def compute_calf(
                 calf_result.reclassified_calf,
                 no_data_value=MissingValue.RECLASSIFIED_CALF.value
             )
-    # TODO: write a CSV with the stats
     return CalfAlgorithmResult(
         calf_ds=output_ds,
-        calf_stats=_aggregate_stats(roi_feature_stats),
+        calf_stats=_consolidate_stats(roi_feature_stats, output_resolution),
         patches=feature_calf_results
     )
-
-
-def _aggregate_stats(
-        calf_stats: typing.List[typing.Tuple[str, str, int, int, int]]
-) -> pandas.DataFrame:
-    return pandas.DataFrame({
-        "region_of_interest": pandas.Series([row[0] for row in calf_stats]),
-        "crop_mask": pandas.Series([row[1] for row in calf_stats]),
-        "fallow_pixels": pandas.Series([row[2] for row in calf_stats]),
-        "planted_pixels": pandas.Series([row[3] for row in calf_stats]),
-        "calf_pixels": pandas.Series([row[4] for row in calf_stats]),
-    })
 
 
 def save_calf_result(calf_ds: xr.Dataset, output_path: Path):
@@ -195,6 +172,31 @@ def save_calf_result(calf_ds: xr.Dataset, output_path: Path):
 def save_aux_calf_result(calf_ds: xr.Dataset, output_path: Path):
     float_ds = calf_ds[[CalfOutputName.NUMERIC_CALF.value, CalfOutputName.SEASONAL_NDVI.value]]
     float_ds.rio.to_raster(output_path)
+
+
+def _consolidate_stats(
+        calf_stats: typing.List[typing.Tuple[str, str, int, int, int]],
+        spatial_resolution: int
+) -> pandas.DataFrame:
+    """Consolidate calf stats in a pandas DataFrame.
+
+    Note that this function assumes the input calf stats were obtained
+    in a projected coordinate system.
+
+    """
+
+    calf_stats = pandas.DataFrame({
+        "region_of_interest": pandas.Series([row[0] for row in calf_stats]),
+        "crop_mask": pandas.Series([row[1] for row in calf_stats]),
+        "fallow_pixels": pandas.Series([row[2] for row in calf_stats]),
+        "planted_pixels": pandas.Series([row[3] for row in calf_stats]),
+        "computed_pixels": pandas.Series([row[4] for row in calf_stats]),
+    })
+    calf_stats["pixel_resolution"] = spatial_resolution
+    calf_stats["fallow_hectares"] = (calf_stats["fallow_pixels"] * spatial_resolution) / 10_000
+    calf_stats["planted_hectares"] = (calf_stats["planted_pixels"] * spatial_resolution) / 10_000
+    calf_stats["total_computed_hectares"] = (calf_stats["computed_pixels"] * spatial_resolution) / 10_000
+    return calf_stats
 
 
 def _generate_output_dataset(

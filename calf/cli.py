@@ -4,15 +4,11 @@ import uuid
 from pathlib import Path
 
 import datacube
+import fiona.errors
+import geopandas
 import typer
-from datacube.model import Dataset as dc_Dataset
 
-from . import (
-    compute_calf,
-    save_calf_result,
-    save_aux_calf_result,
-    utils,
-)
+import calf
 
 app = typer.Typer()
 
@@ -37,12 +33,35 @@ def main(
             ),
             envvar="CALF__END_DATE"
         ),
-        output_path: Path = typer.Argument(
+        ard_product: str = typer.Argument(
+            ...,
+            help="Name of the DESA ARD product to use when calculating CALF",
+            envvar="CALF__ARD_PRODUCT"
+        ),
+        calf_output_path: Path = typer.Argument(
             ...,
             help=("Where to save the generated CALF product"),
             envvar="CALF__OUTPUT_PATH"
         ),
-        region_of_interest: typing.Optional[Path] = typer.Option(
+        calf_aux_output_path: typing.Optional[Path] = typer.Option(
+            None,
+            help=(
+                    "Where to save the generated calf auxiliary datasets. "
+                    "If not provided, these auxiliary datasets are not "
+                    "saved to disk."
+            ),
+            envvar="CALF__AUX_OUTPUT_PATH"
+        ),
+        calf_stats_output_path: typing.Optional[Path] = typer.Option(
+            None,
+            help=(
+                    "Where to save the generated calf stats CSV file. "
+                    "If not provided, calf stats CSV file is not "
+                    "saved to disk."
+            ),
+            envvar="CALF__STATS_OUTPUT_PATH"
+        ),
+        region_of_interest_path: typing.Optional[Path] = typer.Option(
             None,
             help=(
                     "Path to a spatial vector file that has the region of interest "
@@ -103,15 +122,6 @@ def main(
             help="Name of the datacube environment to use for the CALF analysis",
             envvar="DATACUBE_ENVIRONMENT",
         ),
-        ard_product: typing.Optional[str] = typer.Option(
-            None,
-            help=(
-                "Name of the DESA ARD product to use when calculating CALF. If "
-                "not supplied, it will be tentatively auto-detected from the "
-                "input dates."
-            ),
-            envvar="CALF__ARD_PRODUCT"
-        ),
         ard_product_red_band: typing.Optional[str] = typer.Option(
             "red",
             help="Name of the Red band in the ARD product - used for calculating NDVI.",
@@ -133,12 +143,8 @@ def main(
 ):
     """Calculate Crop Arable Land  Fraction (CALF)."""
 
-    if region_of_interest is None and crop_mask_path is None:
+    if region_of_interest_path is None and crop_mask_path is None:
         raise typer.Abort("Must provide either a region of interest, a crop mask, or both")
-    elif region_of_interest is not None:
-        roi = _get_bounding_box(region_of_interest, region_of_interest_layer)
-    else:
-        roi = _get_bounding_box(crop_mask_path, crop_mask_layer)
 
     try:
         dc = datacube.Datacube(
@@ -152,44 +158,55 @@ def main(
     except ValueError:
         typer.Abort("Could not connect to datacube")
 
-    calf_dataset = compute_calf(
+    try:
+        region_of_interest_gdf = geopandas.read_file(
+            region_of_interest_path, layer=region_of_interest_layer)
+    except fiona.errors.DriverError as exc:
+        typer.Abort(f"Could not read region of interest file: {str(exc)}")
+
+    try:
+        crop_mask_gdf = geopandas.read_file(
+            crop_mask_path, layer=crop_mask_layer)
+    except fiona.errors.DriverError as exc:
+        typer.Abort(f"Could not read crop mask file: {str(exc)}")
+
+    typer.secho("Computing CALF...", fg=typer.colors.MAGENTA)
+    calf_result = calf.compute_calf(
         datacube_connection=dc,
         start_date=start_date,
         end_date=end_date,
         ard_product=ard_product,
+        region_of_interest_gdf=region_of_interest_gdf,
+        crop_mask_gdf=crop_mask_gdf,
+        vegetation_threshold=vegetation_mask_threshold,
         red_band=ard_product_red_band,
         nir_band=ard_product_nir_band,
         qflags_band=ard_product_q_flags_band,
-        region_of_interest=None,
-        crop_mask=None,
-        vegetation_threshold=vegetation_mask_threshold,
         output_crs=output_crs,
         output_resolution=output_resolution,
         resampling_method=resampling_method,
-        use_dask=False
+        return_patches=False
     )
-    main.write_result_to_disk(calf_dataset, output_path)
-
-
-def _get_datasets(
-        dc: datacube.Datacube,
-        query_date: typing.Tuple[str, str],
-        product_name: typing.Optional[str] = None,
-) -> typing.List[dc_Dataset]:
-    """Find relevant datasets."""
-    result = []
-    if product_name is not None:
-        result.extend(dc.find_datasets(product=product_name, time=query_date))
-    else:
-        for name in dc.list_products().name:
-            found = dc.find_datasets(
-                product=name,
-                time=query_date
-            )
-            if len(found) > 0:
-                result.extend(found)
-                break
-    return result
+    typer.secho("calf stats", fg=typer.colors.GREEN)
+    typer.secho(calf_result.calf_stats.to_markdown(), fg=typer.colors.GREEN)
+    typer.secho("Saving results...", fg=typer.colors.MAGENTA)
+    calf.save_calf_result(calf_result.calf_ds, calf_output_path)
+    typer.secho(
+        f"Saved main calf output to {str(calf_output_path)!r}",
+        fg=typer.colors.GREEN
+    )
+    if calf_aux_output_path is not None:
+        calf.save_aux_calf_result(calf_result.calf_ds, calf_aux_output_path)
+        typer.secho(
+            f"Saved aux calf output to {str(calf_aux_output_path)!r}",
+            fg=typer.colors.GREEN
+        )
+    if calf_stats_output_path is not None:
+        calf_result.calf_stats.to_csv(calf_stats_output_path, index=False)
+        typer.secho(
+            f"Saved calf stats output to {str(calf_stats_output_path)!r}",
+            fg=typer.colors.GREEN
+        )
 
 
 if __name__ == "__main__":

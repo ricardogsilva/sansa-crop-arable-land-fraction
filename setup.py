@@ -16,6 +16,7 @@ setup(
         "pandas",
         "rasterio",
         "rioxarray",
+        "tabulate",
         "typer",
         "xarray",
     ],

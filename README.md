@@ -23,6 +23,22 @@ in your terminal. Check it out with:
 
 ```
 sansa-calf --help
+
+# example execution
+sansa-calf \
+    2015-01-01 \
+    2021-12-31 \
+    test_spot7_gauteng_old_eo3 \
+    results/calf_cli.tif \
+    --calf-aux-output-path=results/calf_aux_cli.tif \
+    --calf-stats-output-path=results/calf_stats_cli.csv \
+    --region-of-interest-path=test-data/auxiliary.gpkg \
+    --region-of-interest-layer=region-of-interest \
+    --crop-mask-path=test-data/auxiliary.gpkg \
+    --crop-mask-layer=crop-mask \
+    --output-resolution=3 \
+    --datacube-configuration=test-data/docker/datacube/datacube.conf \
+    --datacube-env=sandbox
 ```
 
 

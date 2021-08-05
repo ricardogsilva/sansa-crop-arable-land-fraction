@@ -212,13 +212,13 @@ docker-compose -p calf-test up -d
 cd -
 
 # initialize the datacube DB
-datacube --config test-data/docker/datacube/datacube.conf --env sandbox system init
+datacube --config test-data/datacube.conf --env sandbox system init
 
 # add the products
-datacube --config test-data/docker/datacube/datacube.conf --env sandbox product add data/product-definitions/*
+datacube --config test-data/datacube.conf --env sandbox product add data/product-definitions/*
 
 # index datasets
-datacube --config test-data/docker/datacube/datacube.conf --env sandbox dataset add data/dataset-documents/*
+datacube --config test-data/datacube.conf --env sandbox dataset add data/dataset-documents/*
 
 # python -m calf.calf --help
 

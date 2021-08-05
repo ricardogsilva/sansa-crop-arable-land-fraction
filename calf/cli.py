@@ -144,7 +144,11 @@ def main(
     """Calculate Crop Arable Land  Fraction (CALF)."""
 
     if region_of_interest_path is None and crop_mask_path is None:
-        raise typer.Abort("Must provide either a region of interest, a crop mask, or both")
+        typer.secho(
+            "Must provide either a region of interest, a crop mask, or both",
+            fg=typer.colors.RED
+        )
+        raise typer.Abort()
 
     try:
         dc = datacube.Datacube(
@@ -156,19 +160,23 @@ def main(
             env=datacube_env,
         )
     except ValueError:
-        typer.Abort("Could not connect to datacube")
+        typer.secho("Could not connect to datacube", fg=typer.colors.RED)
+        raise typer.Abort()
 
     try:
         region_of_interest_gdf = geopandas.read_file(
             region_of_interest_path, layer=region_of_interest_layer)
     except fiona.errors.DriverError as exc:
-        typer.Abort(f"Could not read region of interest file: {str(exc)}")
+        typer.secho(
+            f"Could not read region of interest file: {str(exc)}", fg=typer.colors.RED)
+        raise typer.Abort()
 
     try:
         crop_mask_gdf = geopandas.read_file(
             crop_mask_path, layer=crop_mask_layer)
     except fiona.errors.DriverError as exc:
-        typer.Abort(f"Could not read crop mask file: {str(exc)}")
+        typer.secho(f"Could not read crop mask file: {str(exc)}", fg=typer.colors.RED)
+        raise typer.Abort()
 
     typer.secho("Computing CALF...", fg=typer.colors.MAGENTA)
     calf_result = calf.compute_calf(
@@ -202,6 +210,9 @@ def main(
             fg=typer.colors.GREEN
         )
     if calf_stats_output_path is not None:
+        calf_stats_valid_output_path = calf.validate_output_path(
+            calf_stats_output_path, [".csv"], ".csv")
+        calf_stats_valid_output_path.parent.mkdir(parents=True, exist_ok=True)
         calf_result.calf_stats.to_csv(calf_stats_output_path, index=False)
         typer.secho(
             f"Saved calf stats output to {str(calf_stats_output_path)!r}",

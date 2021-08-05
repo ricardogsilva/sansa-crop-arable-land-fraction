@@ -7,7 +7,7 @@ setup(
     author='Ricardo Garcia Silva',
     author_email='ricardo@kartoza.com',
     description='SANSA Crop Arable Land Fraction algorithm',
-    version='0.1.0',
+    version='1.0.0-rc1',
     packages=['calf'],
     install_requires=[
         "datacube",

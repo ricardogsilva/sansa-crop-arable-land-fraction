@@ -104,7 +104,13 @@ def compute_calf(
         seasonal_ndvi_fill=np.nan,
         numeric_calf_name=CalfOutputName.NUMERIC_CALF.value,
         reclassified_calf_name=CalfOutputName.RECLASSIFIED_CALF.value,
-        seasonal_ndvi_name=CalfOutputName.SEASONAL_NDVI.value
+        seasonal_ndvi_name=CalfOutputName.SEASONAL_NDVI.value,
+        attrs={
+            "calf_start_date": start_date,
+            "calf_end_date": end_date,
+            "calf_vegetation_threshold": vegetation_threshold,
+            "calf_input_product": ard_product,
+        }
     )
     intersected_df = geopandas.overlay(
         region_of_interest_gdf,
@@ -165,13 +171,27 @@ def compute_calf(
 
 
 def save_calf_result(calf_ds: xr.Dataset, output_path: Path):
+    valid_output_path = validate_output_path(output_path, [".tif", ".tiff"], ".tif")
+    valid_output_path.parent.mkdir(parents=True, exist_ok=True)
     int_ds = calf_ds[[CalfOutputName.RECLASSIFIED_CALF.value]]
-    int_ds.rio.to_raster(output_path)
+    int_ds.rio.to_raster(valid_output_path)
 
 
 def save_aux_calf_result(calf_ds: xr.Dataset, output_path: Path):
+    valid_output_path = validate_output_path(output_path, [".tif", ".tiff"], ".tif")
+    valid_output_path.parent.mkdir(parents=True, exist_ok=True)
     float_ds = calf_ds[[CalfOutputName.NUMERIC_CALF.value, CalfOutputName.SEASONAL_NDVI.value]]
-    float_ds.rio.to_raster(output_path)
+    float_ds.rio.to_raster(valid_output_path)
+
+
+def validate_output_path(candidate: Path, valid_extensions: typing.List[str], default_extension: str) -> Path:
+    if candidate.is_dir():
+        raise IOError("Output path must not point to an existing directory.")
+    if candidate.suffix.lower() not in (ext.lower() for ext in valid_extensions):
+        new_name = f"{candidate.name}{default_extension}"
+    else:
+        new_name = candidate.name
+    return Path(candidate.parent) / new_name
 
 
 def _consolidate_stats(
@@ -208,6 +228,7 @@ def _generate_output_dataset(
         numeric_calf_name: typing.Optional[str] = "raw_calf",
         reclassified_calf_name: typing.Optional[str] = "calf",
         seasonal_ndvi_name: typing.Optional[str] = "seasonal_ndvi",
+        attrs: typing.Optional[typing.Dict] = None
 ) -> xr.Dataset:
     output_seasonal_ndvi_da = _rasterize_geodataframe(
         region_of_interest,
@@ -234,13 +255,16 @@ def _generate_output_dataset(
         dtype=np.uint8
     )
     output_reclassified_da.rio.write_nodata(reclassified_calf_fill, inplace=True)
-    return xr.Dataset(
+    result = xr.Dataset(
         {
             seasonal_ndvi_name: output_seasonal_ndvi_da,
             numeric_calf_name: output_calf_da,
             reclassified_calf_name: output_reclassified_da
         }
     )
+    for attr_name, attr_value in (attrs or {}).items():
+        result.attrs[attr_name] = attr_value
+    return result
 
 
 def _write_raster(

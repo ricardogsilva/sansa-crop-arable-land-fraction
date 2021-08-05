@@ -8,7 +8,9 @@ import typer
 from datacube.model import Dataset as dc_Dataset
 
 from . import (
-    calf,
+    compute_calf,
+    save_calf_result,
+    save_aux_calf_result,
     utils,
 )
 
@@ -129,131 +131,7 @@ def main(
             envvar="CALF_QFLAGS_BAND"
         ),
 ):
-    """Calculate Crop Arable Land  Fraction (CALF).
-
-    CALF is based on the Normalised Difference vegetation Index (NDVI) derived
-    from SPOT Analysis-ready data (ARD) and ancillary field boundaries data. NDVI
-    is a dimensionless index that is indicative of vegetation vigor and density,
-    calculated as the normalised difference of the surface reflectance in the red
-    and near-infrared (NIR) regions of the electromagnetic spectrum. NDVI is a
-    proxy to quantify vegetation amount and vigor.
-
-    To exclude the non-vegetated surfaces, we apply a **vegetation mask**, defined
-    as NDVI values less than a user-specified threshold (defaulting to 0.2). These
-    pixel values are automatically assigned a Fallow class in the final product.
-    Depending on the known vegetation growth stage (based on the crop calendar), the
-    threshold used for masking non-vegetated surfaces may be increased (e.g., to
-    0.5 at the peak-of-the-season) to mask fallow fields covered with grass and
-    weeds during the growing season. Consequently, only pixels above the threshold
-    are considered for further analysis. Moreover, ancillary data, i.e., field
-    boundaries, are used to create a **crop mask**, which is, in turn, used to
-    limit the analysis to the boundaries of the known fields by the national
-    Department of Agriculture.
-
-
-    If a crop mask is not provided then calculations shall be done over all of the
-    input region of interest.
-
-    If a region of interest is not provided, then it is computed from the crop mask.
-    This means that at least one of them must be provided.
-
-
-    ## Methodology
-
-
-    ### Normalised Difference Vegetation Index (NDVI)
-
-    Vegetation indices allow the delineation of the distribution of vegetation and
-    soil based on the characteristic reflectance patterns of green vegetation.
-    The NDVI has a dynamic range of between -1 and +1, with the negative values
-    representing non-vegetated surfaces such as bare soils and water bodies, and
-    positive values from 0.2 representing sparse to dense vegetation. NDVI is
-    calculated as a ratio between red and near-infrared bands of the electromagnetic
-    spectrum.
-
-        NDVI = (NIR - Red) / (NIR + Red)
-
-    Where **NIR** denotes pixel-wise surface reflectance in the near-infrared band,
-    and **Red** denotes pixel-wise surface reflectance in the red band.
-
-
-    ### Crop and vegetation Masking
-
-    The cropland mask is developed to exclude the non-cropped areas using the crop
-    field boundaries.
-
-    The vegetation mask is created based on the computed NDVI. The threshold
-    of the mask is input by the user (typically ranging from 0.2 to 0.5, depending
-    on the crop growth stage). The resultant mask is a binary layer representing
-    planted and non-planted areas. The mask is applied to the NDVI layer before
-    computing the CALF product.
-
-
-    ### Crop Arable Land Fraction (CALF)
-
-    CALF is computed as:
-
-        CALF = (Xt - Xmed) / Sigma
-
-    Where  **Xt** denotes pixelwise NDVI at time t, **Xmed** and **Sigma** denote the
-    NDVI spatial (i.e. zonal) mean and standard deviation, respectively.
-
-
-    #### CALF algorithm overview
-
-    1. Gather as inputs:
-
-       - A timeseries of SPOT ARD
-
-       - Crop field boundaries
-
-       - Administrative boundaries (i.e. the region of interest)
-
-    2. Compute NDVI for each SPOT ARD
-
-    3. Where multiple acquisitions exist (in the input temporal period), NDVI layers
-       are composited using the method of Greenest Pixel Compositing - this means to
-       build a composited NDVI (seasonal NDVI) where each pixel is the greenest of the
-       timeseries: NDVIseason = max(NDVIt1, NDVt2, ..., NDVItn)
-
-    4. Compute crop and vegetation masks. Areas outside of the crop mask are disregarded
-       from further calculations. Areas below the vegetation threshold are set to zero
-
-    5. Compute zonal statistics for NDVI each feature of the region of interest layer.
-
-    6. Compute CALF for each feature of the region of interest layer.
-
-    7. Write out output products
-
-
-    ## Quality assessment
-
-    The CALF code shall inherit SPOT ARD quality flags and shall also
-
-
-    ## Outputs
-
-    This calculation produces the following outputs:
-
-    1. A GeoTiff file with two bands:
-
-       - Computed CALF numeric values
-       - Quality flags
-
-    2. A reclassified GeoTiff file with with classes (planted and fallow).
-       Reclassification is done according with the following rules:
-
-       - CALF <= 1 : Fallow (i.e. not planted)
-
-       - CALF > 1 : Planted
-
-    3. A vector file with the region of interest used for the analysis where each
-       individual feature of the region of interest has an estimate of the size of
-       each CALF class in hectares an also the proportion of planted land to total
-       arable land.
-
-
-    """
+    """Calculate Crop Arable Land  Fraction (CALF)."""
 
     if region_of_interest is None and crop_mask_path is None:
         raise typer.Abort("Must provide either a region of interest, a crop mask, or both")
@@ -274,7 +152,7 @@ def main(
     except ValueError:
         typer.Abort("Could not connect to datacube")
 
-    calf_dataset = calf.main(
+    calf_dataset = compute_calf(
         datacube_connection=dc,
         start_date=start_date,
         end_date=end_date,
@@ -290,7 +168,7 @@ def main(
         resampling_method=resampling_method,
         use_dask=False
     )
-    calf.write_result_to_disk(calf_dataset, output_path)
+    main.write_result_to_disk(calf_dataset, output_path)
 
 
 def _get_datasets(

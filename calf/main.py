@@ -55,7 +55,7 @@ class CalfAlgorithmResult:
     patches: typing.List[CalfComputationResult]
 
 
-def main(
+def compute_calf(
         datacube_connection: datacube.Datacube,
         start_date: dt.datetime,
         end_date: dt.datetime,
@@ -121,7 +121,7 @@ def main(
             f"({feature_series['name_1']} - {feature_series['name_2']})..."
         )
         # series_stats = roi_feature_stats.setdefault(feature_series["name_1"], [])
-        calf_result = _compute_calf(
+        calf_result = _compute_patch_calf(
             datacube_connection,
             datacube_base_query.copy(),
             feature_series,
@@ -187,12 +187,12 @@ def _aggregate_stats(
     })
 
 
-def write_reclassified_calf_result_to_disk(calf_ds: xr.Dataset, output_path: Path):
+def save_calf_result(calf_ds: xr.Dataset, output_path: Path):
     int_ds = calf_ds[[CalfOutputName.RECLASSIFIED_CALF.value]]
     int_ds.rio.to_raster(output_path)
 
 
-def write_numeric_calf_result_to_disk(calf_ds: xr.Dataset, output_path: Path):
+def save_aux_calf_result(calf_ds: xr.Dataset, output_path: Path):
     float_ds = calf_ds[[CalfOutputName.NUMERIC_CALF.value, CalfOutputName.SEASONAL_NDVI.value]]
     float_ds.rio.to_raster(output_path)
 
@@ -207,7 +207,7 @@ def _generate_output_dataset(
         reclassified_calf_name: typing.Optional[str] = "calf",
         seasonal_ndvi_name: typing.Optional[str] = "seasonal_ndvi",
 ) -> xr.Dataset:
-    output_seasonal_ndvi_da = rasterize_geodataframe(
+    output_seasonal_ndvi_da = _rasterize_geodataframe(
         region_of_interest,
         output_resolution,
         burn_value=seasonal_ndvi_fill,
@@ -215,7 +215,7 @@ def _generate_output_dataset(
         fill=seasonal_ndvi_fill,
         dtype=np.float64
     )
-    output_calf_da = rasterize_geodataframe(
+    output_calf_da = _rasterize_geodataframe(
         region_of_interest,
         output_resolution,
         burn_value=numeric_calf_fill,
@@ -223,7 +223,7 @@ def _generate_output_dataset(
         fill=numeric_calf_fill,
         dtype=np.float64
     )
-    output_reclassified_da = rasterize_geodataframe(
+    output_reclassified_da = _rasterize_geodataframe(
         region_of_interest,
         output_resolution,
         burn_value=reclassified_calf_fill,
@@ -266,7 +266,7 @@ def _write_raster(
         dst.write(data_, indexes=1)
 
 
-def _compute_calf(
+def _compute_patch_calf(
         datacube_connection: datacube.Datacube,
         datacube_base_query: typing.Dict,
         feature_series: geopandas.GeoSeries,
@@ -295,7 +295,7 @@ def _compute_calf(
         logger.debug("Applying cloud/shadow/water mask...")
         valid_da = apply_validity_mask(ds, qflags_band)
         logger.debug("Rasterizing crop mask feature...")
-        crop_mask = rasterize_feature(valid_da, feature_series)
+        crop_mask = _rasterize_feature(valid_da, feature_series)
         logger.debug("Applying crop mask...")
         crop_da = valid_da * crop_mask
         logger.debug("Calculating daily NDVI...")
@@ -432,7 +432,7 @@ def apply_validity_mask(dataset: xr.Dataset, quality_flags_band: str):
     return dataset.where(mask)
 
 
-def rasterize_feature(
+def _rasterize_feature(
         dataset_template: xr.Dataset,
         feature: geopandas.GeoSeries,
         all_touched: bool = False,
@@ -459,7 +459,7 @@ def rasterize_feature(
     return rasterized_xarray
 
 
-def rasterize_geodataframe(
+def _rasterize_geodataframe(
         gdf: geopandas.GeoDataFrame,
         target_resolution: int,
         burn_value: typing.Optional[int] = 1,

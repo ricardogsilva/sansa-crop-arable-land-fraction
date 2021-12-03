@@ -82,6 +82,17 @@ def main(
             ),
             envvar="CALF__REGION_OF_INTEREST_LAYER"
         ),
+        region_of_interest_unique_attribute: str = typer.Argument(
+            ...,
+            help=(
+                "Name of the attribute that can be used to refer to individual "
+                "features in the region of interest polygon layer. NOTE: if this "
+                "attribute exists on both the region of interest and the crop mask "
+                "polygon layers (for example, if both layers have a `name` attribute, "
+                "it must be specified as <attribute-name>_1."
+            ),
+            envvar="CALF__REGION_OF_INTEREST_UNIQUE_ATTRIBUTE"
+        ),
         crop_mask_path: typing.Optional[Path] = typer.Option(
             None,
             help=(
@@ -99,6 +110,17 @@ def main(
                 "Index (1-based) or name of the layer from the crop mask file to use."
             ),
             envvar="CALF__CROP_MASK_LAYER"
+        ),
+        crop_mask_unique_attribute: str = typer.Argument(
+            ...,
+            help=(
+                "Name of the attribute that can be used to refer to individual "
+                "features in the crop mask polygon layer. NOTE: if this "
+                "attribute exists on both the region of interest and the crop mask "
+                "polygon layers (for example, if both layers have a `name` attribute, "
+                "it must be specified as <attribute-name>_2"
+            ),
+            envvar="CALF__CROP_MASK_UNIQUE_ATTRIBUTE"
         ),
         vegetation_mask_threshold: typing.Optional[float] = typer.Option(
             0.2,
@@ -185,7 +207,9 @@ def main(
         end_date=end_date,
         ard_product=ard_product,
         region_of_interest_gdf=region_of_interest_gdf,
+        region_of_interest_unique_attribute=region_of_interest_unique_attribute,
         crop_mask_gdf=crop_mask_gdf,
+        crop_mask_unique_attribute=crop_mask_unique_attribute,
         vegetation_threshold=vegetation_mask_threshold,
         red_band=ard_product_red_band,
         nir_band=ard_product_nir_band,

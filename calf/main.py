@@ -61,7 +61,9 @@ def compute_calf(
         end_date: typing.Union[str, dt.datetime],
         ard_product: str,
         region_of_interest_gdf: geopandas.GeoDataFrame,
+        region_of_interest_unique_attribute: str,
         crop_mask_gdf: geopandas.GeoDataFrame,
+        crop_mask_unique_attribute: str,
         vegetation_threshold: typing.Optional[float] = 0.2,
         red_band: typing.Optional[str] = "red",
         nir_band: typing.Optional[str] = "nir",
@@ -123,7 +125,8 @@ def compute_calf(
     for series_index, feature_series in intersected_df.iterrows():
         logger.debug(
             f"Processing area {series_index + 1} of {len(intersected_df)} "
-            f"({feature_series['name_1']} - {feature_series['name_2']})..."
+            f"({feature_series[region_of_interest_unique_attribute]} - "
+            f"{feature_series[crop_mask_unique_attribute]})..."
         )
         calf_result = _compute_patch_calf(
             datacube_connection,
@@ -131,15 +134,17 @@ def compute_calf(
             feature_series,
             qflags_band,
             intersected_df.crs.to_epsg(),
-            vegetation_threshold
+            vegetation_threshold,
+            region_of_interest_unique_attribute,
+            crop_mask_unique_attribute
         )
         if calf_result is None:
             logger.warning(f"Could not calculate CALF for feature {feature_series}")
         else:
             roi_feature_stats.append(
                 (
-                    feature_series["name_1"],
-                    feature_series["name_2"],
+                    feature_series[region_of_interest_unique_attribute],
+                    feature_series[crop_mask_unique_attribute],
                     calf_result.num_fallow_pixels,
                     calf_result.num_planted_pixels,
                     calf_result.total_pixels
@@ -299,6 +304,8 @@ def _compute_patch_calf(
         qflags_band: str,
         feature_crs: int,
         vegetation_threshold: float,
+        region_of_interest_unique_attribute: str,
+        crop_mask_unique_attribute: str,
 ) -> typing.Optional[CalfComputationResult]:
     datacube_query = datacube_base_query.copy()
     datacube_query["geopolygon"] = dc_geometry.Geometry(
@@ -315,8 +322,9 @@ def _compute_patch_calf(
         result = None
     else:
         base_attrs = {
-            "region_of_interest_feature": feature_series["name_1"],
-            "crop_mask_feature": feature_series["name_2"],
+            "region_of_interest_feature": feature_series[
+                region_of_interest_unique_attribute],
+            "crop_mask_feature": feature_series[crop_mask_unique_attribute],
         }
         logger.debug("Applying cloud/shadow/water mask...")
         valid_da = apply_validity_mask(ds, qflags_band)

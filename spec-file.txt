@@ -204,7 +204,7 @@ https://conda.anaconda.org/conda-forge/linux-64/brotlipy-0.7.0-py38h497a2fe_1001
 https://conda.anaconda.org/conda-forge/linux-64/cftime-1.4.1-py38h5c078b8_0.tar.bz2
 https://conda.anaconda.org/conda-forge/linux-64/cryptography-3.4.7-py38ha5dfef3_0.tar.bz2
 https://conda.anaconda.org/conda-forge/noarch/dask-core-2021.4.1-pyhd8ed1ab_0.tar.bz2
-https://conda.anaconda.org/conda-forge/noarch/jinja2-3.0.0-pyhd8ed1ab_0.tar.bz2
+https://conda.anaconda.org/conda-forge/noarch/jinja2-3.0.3-pyhd8ed1ab_0.tar.bz2
 https://conda.anaconda.org/conda-forge/linux-64/jupyter_core-4.7.1-py38h578d9bd_0.tar.bz2
 https://conda.anaconda.org/conda-forge/linux-64/kombu-5.0.2-py38h578d9bd_2.tar.bz2
 https://conda.anaconda.org/conda-forge/linux-64/libgdal-3.1.4-hbf32332_13.tar.bz2

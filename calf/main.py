@@ -61,9 +61,7 @@ def compute_calf(
         end_date: typing.Union[str, dt.datetime],
         ard_product: str,
         region_of_interest_gdf: geopandas.GeoDataFrame,
-        region_of_interest_unique_attribute: str,
         crop_mask_gdf: geopandas.GeoDataFrame,
-        crop_mask_unique_attribute: str,
         vegetation_threshold: typing.Optional[float] = 0.2,
         red_band: typing.Optional[str] = "red",
         nir_band: typing.Optional[str] = "nir",
@@ -71,8 +69,17 @@ def compute_calf(
         output_crs: str = "EPSG:32635",
         output_resolution: int = 10,
         resampling_method: str = "cubic",
-        return_patches: typing.Optional[bool] = False
+        return_patches: typing.Optional[bool] = False,
+        region_of_interest_unique_attribute: typing.Optional[str] = None,
+        crop_mask_unique_attribute: typing.Optional[str] = None,
+
 ) -> CalfAlgorithmResult:
+    roi_attribute, crop_attribute = _validate_unique_attributes(
+        region_of_interest_unique_attribute,
+        region_of_interest_gdf,
+        crop_mask_unique_attribute,
+        crop_mask_gdf
+    )
     datacube_base_query = {
         "product": ard_product,
         "measurements": [
@@ -125,8 +132,8 @@ def compute_calf(
     for series_index, feature_series in intersected_df.iterrows():
         logger.debug(
             f"Processing area {series_index + 1} of {len(intersected_df)} "
-            f"({feature_series[region_of_interest_unique_attribute]} - "
-            f"{feature_series[crop_mask_unique_attribute]})..."
+            f"({feature_series[roi_attribute]} - "
+            f"{feature_series[crop_attribute]})..."
         )
         calf_result = _compute_patch_calf(
             datacube_connection,
@@ -135,16 +142,16 @@ def compute_calf(
             qflags_band,
             intersected_df.crs.to_epsg(),
             vegetation_threshold,
-            region_of_interest_unique_attribute,
-            crop_mask_unique_attribute
+            roi_attribute,
+            crop_attribute
         )
         if calf_result is None:
             logger.warning(f"Could not calculate CALF for feature {feature_series}")
         else:
             roi_feature_stats.append(
                 (
-                    feature_series[region_of_interest_unique_attribute],
-                    feature_series[crop_mask_unique_attribute],
+                    feature_series[roi_attribute],
+                    feature_series[crop_attribute],
                     calf_result.num_fallow_pixels,
                     calf_result.num_planted_pixels,
                     calf_result.total_pixels
@@ -536,3 +543,38 @@ def _get_coords(geo_transform: rasterio.Affine, width: int, height: int):
     row_coords = [rasterio.transform.xy(geo_transform, r, 0)[1] for r in range(height)]
     col_coords = [rasterio.transform.xy(geo_transform, 0, c)[0] for c in range(width)]
     return row_coords, col_coords
+
+
+def _validate_unique_attributes(
+        region_of_interest_attribute: typing.Optional[str],
+        region_of_interest_gdf: geopandas.GeoDataFrame,
+        crop_mask_attribute: typing.Optional[str],
+        crop_mask_gdf: geopandas.GeoDataFrame
+) -> typing.Tuple[str, str]:
+    if region_of_interest_attribute is None:
+        region_of_interest_attribute = region_of_interest_gdf.columns[0]
+        roi_attr_exists = True
+    else:
+        roi_attr_exists = region_of_interest_attribute in region_of_interest_gdf.columns
+
+    if crop_mask_attribute is None:
+        crop_mask_attribute = crop_mask_gdf.columns[0]
+        crop_attr_exists = True
+    else:
+        crop_attr_exists = crop_mask_attribute in crop_mask_gdf.columns
+
+    if roi_attr_exists and crop_attr_exists:
+        if region_of_interest_attribute == crop_mask_attribute:
+            roi_attr = f"{region_of_interest_attribute}_1"
+            crop_attr = f"{crop_mask_attribute}_2"
+        else:
+            roi_attr = region_of_interest_attribute
+            crop_attr = crop_mask_attribute
+    elif not roi_attr_exists:
+        raise RuntimeError(
+            f"Invalid region of interest attribute: {region_of_interest_attribute!r}")
+    elif not crop_attr_exists:
+        raise RuntimeError(f"Invalid crop mask attribute: {crop_mask_attribute!r}")
+    else:
+        raise RuntimeError("Reached undefined state when validating attribute names")
+    return roi_attr, crop_attr

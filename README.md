@@ -41,11 +41,11 @@ After having installed the code, you should now have access to the `sansa-calf` 
 in your terminal. Check it out with:
 
 ```
-sansa-calf --help
+sansa-calf compute-calf --help
 
 # example execution (both region of interest and crop mask layers have a 
 # `name` attribute as their unique identifier
-sansa-calf \
+sansa-calf compute-calf \
     2015-01-01 \
     2021-12-31 \
     test_spot7_gauteng_old_eo3 \
@@ -242,10 +242,11 @@ datacube --config test-data/datacube.conf --env sandbox system init
 datacube --config test-data/datacube.conf --env sandbox product add test-data/datacube-documents/product-definitions/*
 
 # index datasets
-datacube --config test-data/datacube.conf --env sandbox dataset add test-data/datacube-documents/dataset-documents/*
+sansa-calf prepare-sample-data
+datacube --config test-data/datacube.conf --env sandbox dataset add spot*.yml
 
 # sansa-calf --help
 
 # or launch a jupyter notebook server and use the provided `calf-interactive-testing` notebook
-DATACUBE_CONFIG_PATH=$PWD/test-data/datacube.conf jupyer lab
+DATACUBE_CONFIG_PATH=$PWD/test-data/datacube.conf jupyter lab
 ```

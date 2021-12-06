@@ -228,7 +228,7 @@ This is an overview of the CALF algorithm, as implemented in the current reposit
 The `test-data` directory contains some data that may be used for testing purposes
 
 ```
-conda env create --name sansa-calf --file spec-file.txt
+conda create --name sansa-calf --file spec-file.txt
 conda activate
 
 cd test-data/docker
@@ -240,6 +240,9 @@ datacube --config test-data/datacube.conf --env sandbox system init
 
 # add the products
 datacube --config test-data/datacube.conf --env sandbox product add test-data/datacube-documents/product-definitions/*
+
+# install the calf package
+pip install --editable .
 
 # index datasets
 sansa-calf prepare-sample-data

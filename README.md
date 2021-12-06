@@ -5,10 +5,29 @@ This repository implements SANSA's _Crop Arable Land Fraction_ algorithm.
 
 ## Installation
 
-- Install conda
-- Create and activate a conda env
+- Install miniconda
+  
+- configure conda-forge
+  
+  ```
+  conda config --prepend channels conda-forge
+  conda config --set channel_priority strict
+  ```
+  
 - Clone this repo
+  
+- Create and activate a conda env
+  
+  ```
+  conda create --name sansa-calf --file spec-file.txt 
+  conda activate sansa-calf
+  ```
+  
 - Use pip to install it inside the conda env
+  
+  ```
+  pip install --editable .
+  ```
 
 
 ## Usage
@@ -22,14 +41,17 @@ After having installed the code, you should now have access to the `sansa-calf` 
 in your terminal. Check it out with:
 
 ```
-sansa-calf --help
+sansa-calf compute-calf --help
 
-# example execution
-sansa-calf \
+# example execution (both region of interest and crop mask layers have a 
+# `name` attribute as their unique identifier
+sansa-calf compute-calf \
     2015-01-01 \
     2021-12-31 \
     test_spot7_gauteng_old_eo3 \
     results/calf_cli.tif \
+    name_1 \
+    name_2 \
     --calf-aux-output-path=results/calf_aux_cli.tif \
     --calf-stats-output-path=results/calf_stats_cli.csv \
     --region-of-interest-path=test-data/auxiliary.gpkg \
@@ -56,7 +78,9 @@ calf_result = calf.compute_calf(
     end_date="2021-12-31",
     ard_product="test_spot7_gauteng_old_eo3",
     region_of_interest_gdf=roi_gdf,
+    region_of_interest_unique_attribute="name_1",
     crop_mask_gdf=crop_gdf,
+    crop_mask_unique_attribute="name_2",
     vegetation_threshold=0.2,
     red_band="red",
     nir_band="nir",
@@ -204,7 +228,7 @@ This is an overview of the CALF algorithm, as implemented in the current reposit
 The `test-data` directory contains some data that may be used for testing purposes
 
 ```
-conda env create --file spec-file.txt
+conda create --name sansa-calf --file spec-file.txt
 conda activate
 
 cd test-data/docker
@@ -215,13 +239,17 @@ cd -
 datacube --config test-data/datacube.conf --env sandbox system init
 
 # add the products
-datacube --config test-data/datacube.conf --env sandbox product add data/product-definitions/*
+datacube --config test-data/datacube.conf --env sandbox product add test-data/datacube-documents/product-definitions/*
+
+# install the calf package
+pip install --editable .
 
 # index datasets
-datacube --config test-data/datacube.conf --env sandbox dataset add data/dataset-documents/*
+sansa-calf prepare-sample-data
+datacube --config test-data/datacube.conf --env sandbox dataset add spot*.yml
 
-# python -m calf.calf --help
+# sansa-calf --help
 
 # or launch a jupyter notebook server and use the provided `calf-interactive-testing` notebook
-DATACUBE_CONFIG_PATH={full-path-to-datacube.conf} jupyer lab
+DATACUBE_CONFIG_PATH=$PWD/test-data/datacube.conf jupyter lab
 ```

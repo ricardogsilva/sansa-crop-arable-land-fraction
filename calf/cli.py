@@ -7,6 +7,10 @@ import datacube
 import fiona.errors
 import geopandas
 import typer
+from jinja2 import (
+    Environment,
+    PackageLoader
+)
 
 import calf
 
@@ -14,7 +18,7 @@ app = typer.Typer()
 
 
 @app.command()
-def main(
+def compute_calf(
         start_date: dt.datetime = typer.Argument(
             ...,
             help=(
@@ -140,6 +144,24 @@ def main(
             help="Name of the Quality Flags band in the ARD product.",
             envvar="CALF_QFLAGS_BAND"
         ),
+        region_of_interest_unique_attribute: typing.Optional[str] = typer.Option(
+            None,
+            help=(
+                    "Name of the attribute that can be used to refer to individual "
+                    "features in the region of interest polygon layer. Defaults to the "
+                    "name of the first column in the layer's attribute table."
+            ),
+            envvar="CALF__REGION_OF_INTEREST_UNIQUE_ATTRIBUTE"
+        ),
+        crop_mask_unique_attribute: typing.Optional[str] = typer.Option(
+            None,
+            help=(
+                    "Name of the attribute that can be used to refer to individual "
+                    "features in the crop mask polygon layer. Defaults to the name of "
+                    "the first column in the layer's attribute table."
+            ),
+            envvar="CALF__CROP_MASK_UNIQUE_ATTRIBUTE"
+        ),
 ):
     """Calculate Crop Arable Land  Fraction (CALF)."""
 
@@ -193,7 +215,9 @@ def main(
         output_crs=output_crs,
         output_resolution=output_resolution,
         resampling_method=resampling_method,
-        return_patches=False
+        return_patches=False,
+        region_of_interest_unique_attribute=region_of_interest_unique_attribute,
+        crop_mask_unique_attribute=crop_mask_unique_attribute,
     )
     typer.secho("calf stats", fg=typer.colors.GREEN)
     typer.secho(calf_result.calf_stats.to_markdown(), fg=typer.colors.GREEN)
@@ -218,6 +242,34 @@ def main(
             f"Saved calf stats output to {str(calf_stats_output_path)!r}",
             fg=typer.colors.GREEN
         )
+
+
+@app.command()
+def prepare_sample_data(
+        base_path: typing.Optional[Path] = typer.Option(
+            Path(__file__).parents[1] / "test-data",
+            help="Base path for the sample data",
+            envvar="CALF__SAMPLE_DATA_BASE_PATH"
+        ),
+        rendered_directory: typing.Optional[Path] = typer.Option(
+            Path.cwd(),
+            help="Where to store the rendered datacube dataset-document file",
+            envvar="CALF__RENDERED_DIRECTORY"
+        )
+):
+    env = Environment(
+        loader=PackageLoader("calf", "templates")
+    )
+    template_name = "spot7-dataset-document.yml"
+    template = env.get_template(f"datacube-documents/dataset-documents/{template_name}")
+    rendered = template.render(base_path=base_path)
+    output_path = rendered_directory / template_name
+    with output_path.open(mode="w") as fh:
+        fh.write(rendered)
+    typer.secho(
+        f"Dataset document file has been rendered at {str(output_path)!r}",
+        fg=typer.colors.GREEN
+    )
 
 
 if __name__ == "__main__":

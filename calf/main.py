@@ -131,11 +131,11 @@ def compute_calf(
     exploded_intersected_gdf = intersected_df.explode()
     roi_feature_stats = []
     feature_calf_results = []
-    for series_index, feature_series in exploded_intersected_gdf.iterrows():
+    for current, iterator_data in enumerate(exploded_intersected_gdf.iterrows()):
+        series_index, feature_series = iterator_data
         logger.debug(
-            f"Processing area {series_index + 1} of {len(exploded_intersected_gdf)} "
-            f"({feature_series[roi_attribute]} - "
-            f"{feature_series[crop_attribute]})..."
+            f"Processing area { current + 1} of {len(exploded_intersected_gdf)} ({series_index}) "
+            f"({feature_series[roi_attribute]} - {feature_series[crop_attribute]})..."
         )
         calf_result = _compute_patch_calf(
             datacube_connection,

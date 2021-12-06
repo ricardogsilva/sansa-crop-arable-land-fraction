@@ -15,6 +15,7 @@ import rioxarray  # NOTE: this import is needed in order to use rioxarray, don't
 import xarray as xr
 from datacube.model import Dataset as dc_Dataset
 from datacube.utils import geometry as dc_geometry
+from rioxarray.exceptions import OneDimensionalRaster
 
 logger = logging.getLogger(__name__)
 
@@ -127,20 +128,21 @@ def compute_calf(
         how="intersection",
         keep_geom_type=True
     )
+    exploded_intersected_gdf = intersected_df.explode()
     roi_feature_stats = []
     feature_calf_results = []
-    for series_index, feature_series in intersected_df.iterrows():
+    for current, iterator_data in enumerate(exploded_intersected_gdf.iterrows()):
+        series_index, feature_series = iterator_data
         logger.debug(
-            f"Processing area {series_index + 1} of {len(intersected_df)} "
-            f"({feature_series[roi_attribute]} - "
-            f"{feature_series[crop_attribute]})..."
+            f"Processing area { current + 1} of {len(exploded_intersected_gdf)} ({series_index}) "
+            f"({feature_series[roi_attribute]} - {feature_series[crop_attribute]})..."
         )
         calf_result = _compute_patch_calf(
             datacube_connection,
             datacube_base_query.copy(),
             feature_series,
             qflags_band,
-            intersected_df.crs.to_epsg(),
+            exploded_intersected_gdf.crs.to_epsg(),
             vegetation_threshold,
             roi_attribute,
             crop_attribute
@@ -382,11 +384,17 @@ def _compute_patch_calf(
     return result
 
 
-def _count_calf_pixels(reclassfied_calf: xr.DataArray) -> typing.Tuple[int, int, int]:
+def _count_calf_pixels(reclassified_calf: xr.DataArray) -> typing.Tuple[int, int, int]:
     logger.debug("Counting number of fallow and planted pixels...")
-    counts, frequencies = np.unique(reclassfied_calf, return_counts=True)
-    num_planted = int(frequencies[counts == CalfClassification.PLANTED.value])
-    num_fallow = int(frequencies[counts == CalfClassification.FALLOW.value])
+    counts, frequencies = np.unique(reclassified_calf, return_counts=True)
+    try:
+        num_planted = int(frequencies[counts == CalfClassification.PLANTED.value])
+    except TypeError:
+        num_planted = 0
+    try:
+        num_fallow = int(frequencies[counts == CalfClassification.FALLOW.value])
+    except TypeError:
+        num_fallow = 0
     total = num_planted + num_fallow
     return num_fallow, num_planted, total
 
@@ -396,8 +404,19 @@ def _overlay_arrays(
         top: xr.DataArray,
         no_data_value: typing.Optional[typing.Any] = None
 ) -> None:
+    try:
+        top_bounds = top.rio.bounds()
+    except OneDimensionalRaster:
+        # rioxarray has trouble getting the bounds of 1-d rasters, so we get them manually
+        x_offset, x_resolution, _, y_offset, _, y_resolution = top.affine.to_gdal()
+        left_bound = x_offset
+        right_bound = x_offset + top.rio.width * x_resolution
+        top_bound = y_offset
+        bottom_bound = y_offset + top.rio.height * y_resolution
+        top_bounds = (left_bound, bottom_bound, right_bound, top_bound)
+
     window = rasterio.windows.from_bounds(
-        *top.rio.bounds(),
+        *top_bounds,
         transform=bottom.rio.transform()
     )
     start_row = int(window.row_off)

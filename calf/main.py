@@ -382,11 +382,17 @@ def _compute_patch_calf(
     return result
 
 
-def _count_calf_pixels(reclassfied_calf: xr.DataArray) -> typing.Tuple[int, int, int]:
+def _count_calf_pixels(reclassified_calf: xr.DataArray) -> typing.Tuple[int, int, int]:
     logger.debug("Counting number of fallow and planted pixels...")
-    counts, frequencies = np.unique(reclassfied_calf, return_counts=True)
-    num_planted = int(frequencies[counts == CalfClassification.PLANTED.value])
-    num_fallow = int(frequencies[counts == CalfClassification.FALLOW.value])
+    counts, frequencies = np.unique(reclassified_calf, return_counts=True)
+    try:
+        num_planted = int(frequencies[counts == CalfClassification.PLANTED.value])
+    except TypeError:
+        num_planted = 0
+    try:
+        num_fallow = int(frequencies[counts == CalfClassification.FALLOW.value])
+    except TypeError:
+        num_fallow = 0
     total = num_planted + num_fallow
     return num_fallow, num_planted, total
 
